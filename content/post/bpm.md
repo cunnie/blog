@@ -7,71 +7,125 @@ categories:
 date: 2018-05-28T16:16:22Z
 draft: true
 short: |
-  Enhancing a BOSH release with `bpm` brings a number of advantages,
+  Enhancing a BOSH release with BPM brings a number of advantages,
   not the least of which is BOSH job isolation. In this blog post we
-  describe the steps we followed to include bpm in our nginx BOSH release.
-title: Enhancing a BOSH Release with bpm
+  describe the steps we followed to include BPM in our nginx BOSH release.
+title: How to BPM-ify a BOSH release
 ---
 
+A [BOSH]() Director is a virtual machine (VM) orchestrator. A BOSH Director
+deploys BOSH releases (specially-packaged applications) to VMs. A BOSH release
+consists of zero or more jobs (services, e.g. nginx), which can be enhanced with
+[BPM](). BPM has several features, but the one we are most interested in is
+process isolation, which means that even if a job (service) is compromised, the
+VM on which it runs is not necessary compromised.
 
+"Job colocation" is a term which describes When BOSH jobs from two or more
+releases are run on the same VM. For example, we often colocate our nginx web
+server on our BOSH Director, but we have misgivings: if our webserver is
+compromised, our entire BOSH Director is compromised. With BPM we can limit the
+damage and not expose our Director
 
-## Writing a _Good_ Post
+This blog post is directed towards BOSH release writers who would like to
+incorporate BPM in their BOSH release.
 
-_copied from [the README](https://github.com/pivotal-legacy/blog#writing-a-good-post)..._
+In this blog post we describe the steps we go through to BPM-ify our BOSH nginx
+release.
 
-### Keep it technical.
+### 0. Modify the `monit` script
 
-People want to to be educated and enlightened.  Our audience are engineers, so
-the way to reach them is through code.  The more code samples, the better.
+Modify the job's monit script. This is where we add `bpm` as a wrapper:
 
-### Nobody likes a wall of text.
+```diff
+-  with pidfile /var/vcap/sys/run/nginx/nginx.pid
+-  start program "/var/vcap/jobs/nginx/bin/ctl start"
+-  stop program "/var/vcap/jobs/nginx/bin/ctl stop"
++  with pidfile /var/vcap/jobs/nginx/nginx.pid
++  start program "/var/vcap/jobs/bpm/bin/bpm start nginx"
++  stop program "/var/vcap/jobs/bpm/bin/bpm stop nginx"
+```
 
-{{< responsive-figure src="/images/pairing.jpg" class="right small" >}}
+Note: normally the PID file would be placed in
+`/var/vcap/sys/run/bpm/nginx/nginx.pid`; however, we don't have such luxury, for
+`nginx` writes the PID file, not BPM. This is because `nginx` adheres to an ancient
+practice of UNIX daemons, to whit: they bind to the port with root privileges,
+change process group, close most descriptors, de-escalate privileges, fork()
+the "master" process, then exit.
 
-Use headers to break up your text.  Each image you add to your post increases its XP by 100.  Diagrams, screen shots, or humorous "meme" (_|memā|_) gifs...  They all add color.  If you don't have OmniGraffle, then submit an ask ticket.  There's no excuse for monotony.
+### 1. Get rid of the `ctl` script
 
-### Your 10th grade teacher was right.
+After converting to BPM, _The ctl script is completely ignored_;
+delete it. It's useless.
 
-Make use of the hamburger technique.  Your audience doesn't have a lot of time.  Tell them what you're going to write, write it, and then tell them what you've written.  Spend time on your opening.  Make it click.
+```bash
+git rm jobs/nginx/templates/ctl.sh
+```
 
-### Pair all the time.
+Remove references to the `ctl` script from the spec file. And, while we're
+editing this file, include a reference to a new BPM template (`bpm.yml.erb`)
+which we will cover in the next section:
 
-We do everything as a team, and this is no different.  Get feedback from your friends and coworkers.  Show them the post on the staging site, and ask them to tear it apart.
+```diff
+ ---
+ name: nginx
+ templates:
+-   ctl.sh: bin/ctl
++   bpm.yml.erb: config/bpm.yml
+```
 
-### Make it pretty.
+Note: BPM does not affect the lifecycle jobs (pre-start, post-start, and drain);
+it only affects the monit start-and-stop programs (i.e. the `ctl` script).
 
-Pivotal-ui comes with a bunch of nice helpers.  Make use of them.  Check out the example styles below:
+### 2. Create Your BPM Configuration Template File
 
+Create your BPM configuration file (`jobs/nginx/templates/bpm.yml.erb`). Ours
+looks like this:
+
+```yaml
 ---
+processes:
+  auctioneer:
+    executable: /var/vcap/packages/nginx/sbin/nginx
+    args:
+      - -g
+      - pidfile /var/vcap/data/nginx/nginx.pid
+      - -c
+      - /var/vcap/jobs/nginx/etc/nginx.conf
+    limits:
+      open_files: 100000
+```
 
-# Header 1
+### 2. Include BPM In Your Sample Manifests
 
-Don't use this, since it looks like a main title.
+Be generous to your users; include BPM in your sample manifests.
 
-## Header 2
+```diff
+ releases:
+ - name: nginx
+   version: latest
++- name: bpm
++  version: latest
+```
 
-### Header 3
+### Troubleshooting
 
-#### Header 4
+When the job isn't starting
 
-##### Header 5
+https://cloudfoundry.slack.com/archives/C7A0K6NMU/p1527201139000348
 
-###### Header 6
+> If you want to troubleshoot the process manually, you can also try `monit unmonitor ...` and then just use `bpm start ...` interactively to see what is happening.
 
-{{< responsive-figure src="/images/pairing.jpg" class="left" >}}
+### References
 
-Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.
+Canonical BOSH BPM documentation: https://bosh.io/docs/bpm/bpm/
 
-~~~ruby
-instance = Class.new("foo")
-~~~
+Transitioning to BPM: https://github.com/cloudfoundry-incubator/bpm-release/blob/master/docs/transitioning.md
 
-| Header 1        | Header 2  | ...        |
-| --------------  | :-------: | ---------: |
-| SSH (22)        | TCP (6)   | 22         |
-| HTTP (80)       | TCP (6)   | 80         |
-| HTTPS (443)     | TCP (6)   | 443        |
-| Custom TCP Rule | TCP (6)   | 2222       |
-| Custom TCP Rule | TCP (6)   | 6868       |
+### Footnotes
 
-{{< responsive-figure src="/images/pairing.jpg" class="center" >}}
+When `bpm` isn't colocated, the job will fail with a cryptic:
+
+```
+Task 7 | 01:01:04 | Updating instance nginx: nginx/87b5e8a9-7ed4-44af-bc09-4a2141da8c4b (0) (canary) (00:01:21)
+                   L Error: 'nginx/87b5e8a9-7ed4-44af-bc09-4a2141da8c4b (0)' is not running after update. Review logs for failed jobs: nginx
+```
