@@ -13,7 +13,7 @@ short: |
 title: How to BPM-ify a BOSH release
 ---
 
-A [BOSH]() Director is a virtual machine (VM) orchestrator. A BOSH Director
+A [BOSH](https://en.wikipedia.org/wiki/BOSH_(software)) Director is a virtual machine (VM) orchestrator. A BOSH Director
 deploys BOSH releases (specially-packaged applications) to VMs. A BOSH release
 consists of zero or more jobs (services, e.g. nginx), which can be enhanced with
 [BPM](). BPM has several features, but the one we are most interested in is
@@ -27,10 +27,9 @@ compromised, our entire BOSH Director is compromised. With BPM we can limit the
 damage and not expose our Director
 
 This blog post is directed towards BOSH release writers who would like to
-incorporate BPM in their BOSH release.
+incorporate BPM into their BOSH release.
 
-In this blog post we describe the steps we go through to BPM-ify our BOSH nginx
-release.
+In this blog post we describe the steps to BPM-ify our BOSH nginx release.
 
 ### 0. Modify the `monit` script
 
@@ -40,7 +39,7 @@ Modify the job's monit script. This is where we add `bpm` as a wrapper:
 -  with pidfile /var/vcap/sys/run/nginx/nginx.pid
 -  start program "/var/vcap/jobs/nginx/bin/ctl start"
 -  stop program "/var/vcap/jobs/nginx/bin/ctl stop"
-+  with pidfile /var/vcap/jobs/nginx/nginx.pid
++  with pidfile /var/vcap/sys/run/bpm/nginx/nginx.pid
 +  start program "/var/vcap/jobs/bpm/bin/bpm start nginx"
 +  stop program "/var/vcap/jobs/bpm/bin/bpm stop nginx"
 ```
@@ -87,8 +86,6 @@ processes:
   auctioneer:
     executable: /var/vcap/packages/nginx/sbin/nginx
     args:
-      - -g
-      - pidfile /var/vcap/data/nginx/nginx.pid
       - -c
       - /var/vcap/jobs/nginx/etc/nginx.conf
     limits:
@@ -107,6 +104,11 @@ Be generous to your users; include BPM in your sample manifests.
 +  version: latest
 ```
 
+### 3. Notify The Release Users
+
+- Include BPM in manifest, upload release
+- Include notice about `daemon off` in `nginx.conf`
+
 ### Troubleshooting
 
 When the job isn't starting
@@ -120,6 +122,11 @@ https://cloudfoundry.slack.com/archives/C7A0K6NMU/p1527201139000348
 Canonical BOSH BPM documentation: https://bosh.io/docs/bpm/bpm/
 
 Transitioning to BPM: https://github.com/cloudfoundry-incubator/bpm-release/blob/master/docs/transitioning.md
+
+### Acknowledgements
+
+Chris Brown who suggested to use [`daemon off`](https://cloudfoundry.slack.com/archives/C7A0K6NMU/p1527739265000073)
+I wasn't happ
 
 ### Footnotes
 
